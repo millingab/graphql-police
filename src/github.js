@@ -16,6 +16,7 @@ const jwt_token = jwt.sign({ iss: appId },
     expiresIn: '10m'
   });
 
+
 const gh = new GitHubApi({
   debug: true,
   protocol: 'https',
@@ -27,11 +28,35 @@ const gh = new GitHubApi({
   followRedirects: false,
   timeout: 5000,
 });
-debugger;
+
 gh.authenticate({
   type: 'integration',
   token: jwt_token,
 });
+
+//generate
+
+// gh.authenticate({
+//   type: 'token',
+//   token: token,
+// });
+
+export const generateJWT = function () {
+  const jwt_token = jwt.sign({ iss: appId },
+    cert, {
+      algorithm: 'RS256',
+      expiresIn: '10m'
+    });
+
+  gh.authenticate({
+    type: 'integration',
+    token: jwt_token,
+  });
+};
+
+export const installationToken = async (id: string) => {
+  gh.integrations.createInstallationToken({installation_id: id});
+};
 
 export const getLoggedUser = async () => {
   gh.users.get({});
