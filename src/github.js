@@ -5,24 +5,37 @@ import { version } from '../package.json';
 
 import type { GhCommit } from './TypeDefinition';
 
+const fs = require('fs');
+const jwt = require('jsonwebtoken');
+const appId = 3670;
+
+const cert = fs.readFileSync('graphql-police.2017-07-12.private-key.pem');
+const jwt_token = jwt.sign({ iss: appId },
+  cert, {
+    algorithm: 'RS256',
+    expiresIn: '10m'
+  });
+
 const gh = new GitHubApi({
-  debug: false,
+  debug: true,
   protocol: 'https',
   host: 'api.github.com',
   headers: {
     'User-Agent':
-      `GraphQLVigilantBot/${version} (+https://github.com/entria/graphql-vigilant-bot)`,
+      `millingab/GraphQL-police (+https://github.com/millingab/graphql-police)`,
   },
   followRedirects: false,
   timeout: 5000,
 });
-
+debugger;
 gh.authenticate({
-  type: 'token',
-  token: process.env.GITHUB_TOKEN,
+  type: 'integration',
+  token: jwt_token,
 });
 
-export const getLoggedUser = async () => gh.users.get({});
+export const getLoggedUser = async () => {
+  gh.users.get({});
+};
 
 export const findThisBotComment = async (
   owner: string,

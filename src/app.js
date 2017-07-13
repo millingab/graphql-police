@@ -93,10 +93,11 @@ app.use(async (ctx) => {
   if (!validActions.includes(data.action)) {
     return;
   }
-
+  
   console.log('Handling PR:', pullRequestPayload.html_url);
 
   const { data: thisBot } = await gh.getLoggedUser();
+
   const thisBotComment = await gh.findThisBotComment(repo.owner.login, repo.name, pullRequestPayload.number, thisBot);
 
   const { base, head } = pullRequestPayload;
