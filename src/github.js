@@ -8,14 +8,7 @@ import type { GhCommit } from './TypeDefinition';
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const appId = 3670;
-
 const cert = fs.readFileSync('graphql-police.2017-07-12.private-key.pem');
-const jwt_token = jwt.sign({ iss: appId },
-  cert, {
-    algorithm: 'RS256',
-    expiresIn: '10m'
-  });
-
 
 const gh = new GitHubApi({
   debug: true,
@@ -29,19 +22,7 @@ const gh = new GitHubApi({
   timeout: 5000,
 });
 
-gh.authenticate({
-  type: 'integration',
-  token: jwt_token,
-});
-
-//generate
-
-// gh.authenticate({
-//   type: 'token',
-//   token: token,
-// });
-
-export const generateJWT = function () {
+export const authenticateGithubApp = async (id: string) => {
   const jwt_token = jwt.sign({ iss: appId },
     cert, {
       algorithm: 'RS256',
@@ -52,10 +33,13 @@ export const generateJWT = function () {
     type: 'integration',
     token: jwt_token,
   });
-};
 
-export const installationToken = async (id: string) => {
-  gh.integrations.createInstallationToken({installation_id: id});
+  const result = await gh.integrations.createInstallationToken({installation_id: id});
+  
+  gh.authenticate({
+    type: 'token',
+    token: result.data.token,
+  });
 };
 
 export const getLoggedUser = async () => {
@@ -66,7 +50,6 @@ export const findThisBotComment = async (
   owner: string,
   repo: string,
   pullRequestNumber: number,
-  thisBot: any,
   currentPage: ?number = 1,
 ) => {
   const result = await gh.issues.getComments({
@@ -79,10 +62,10 @@ export const findThisBotComment = async (
 
   const comments = result.data;
 
-  let found = comments.find(comment => comment.user.id === thisBot.id);
+  let found = comments.find(comment => comment.user.login === 'graphql-police[bot]');
 
   if (!found && gh.hasNextPage(result)) {
-    found = await findThisBotComment(owner, repo, pullRequestNumber, thisBot, currentPage + 1);
+    found = await findThisBotComment(owner, repo, pullRequestNumber, currentPage + 1);
   }
 
   return found;

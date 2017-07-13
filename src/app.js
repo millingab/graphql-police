@@ -96,116 +96,113 @@ app.use(async (ctx) => {
 
   console.log('Handling PR:', pullRequestPayload.html_url);
 
-  gh.generateJWT();
-
-  const {data: token} = await gh.installationToken(data.installation.id);
-  debugger;
+  await gh.authenticateGithubApp(data.installation.id);
 
   // const { data: thisBot } = await gh.getLoggedUser();
 
-  // const thisBotComment = await gh.findThisBotComment(repo.owner.login, repo.name, pullRequestPayload.number, thisBot);
+  const { base, head } = pullRequestPayload;
 
-  // const { base, head } = pullRequestPayload;
+  const thisBotComment = await gh.findThisBotComment(head.user.login, head.repo.name, pullRequestPayload.number);
+  
+  const changedFiles = await gh.getFilesFromCommit(head.user.login, head.repo.name, head.sha);
 
-  // const changedFiles = await gh.getFilesFromCommit(head.user.login, head.repo.name, head.sha);
+  const changedSchemaFiles = filterSchemaFiles(changedFiles);
 
-  // const changedSchemaFiles = filterSchemaFiles(changedFiles);
+  // No schema files were modified
+  if (!changedSchemaFiles.length) {
+    return;
+  }
 
-  // // No schema files were modified
-  // if (!changedSchemaFiles.length) {
-  //   return;
-  // }
+  const analysisResults = await changedSchemaFiles.reduce(async (accumP: Promise<Array<AnalysisResult>>, file) => {
+    const arr = await accumP;
+    try {
+      let originalFileName = file.filename;
+      // verify if the file was renamed, if yes, use previous name
+      if (file.status === 'renamed') {
+        // In case there were no changes, ignore this file.
+        if (file.changes === 0) {
+          throw new Error('Schema file renamed, but no changes detected.');
+        }
+        originalFileName = file.previous_filename;
+      }
 
-  // const analysisResults = await changedSchemaFiles.reduce(async (accumP: Promise<Array<AnalysisResult>>, file) => {
-  //   const arr = await accumP;
-  //   try {
-  //     let originalFileName = file.filename;
-  //     // verify if the file was renamed, if yes, use previous name
-  //     if (file.status === 'renamed') {
-  //       // In case there were no changes, ignore this file.
-  //       if (file.changes === 0) {
-  //         throw new Error('Schema file renamed, but no changes detected.');
-  //       }
-  //       originalFileName = file.previous_filename;
-  //     }
+      const { data: originalFileContent } = await gh.getFileContent(
+        base.user.login,
+        base.repo.name,
+        originalFileName,
+        base.sha,
+      );
+      const { data: changedFileContent } = await gh.getFileContent(
+        head.user.login,
+        head.repo.name,
+        file.filename,
+        head.sha,
+      );
+      let parseError = null;
+      let breakingChanges = [];
 
-  //     const { data: originalFileContent } = await gh.getFileContent(
-  //       base.user.login,
-  //       base.repo.name,
-  //       originalFileName,
-  //       base.sha,
-  //     );
-  //     const { data: changedFileContent } = await gh.getFileContent(
-  //       head.user.login,
-  //       head.repo.name,
-  //       file.filename,
-  //       head.sha,
-  //     );
-  //     let parseError = null;
-  //     let breakingChanges = [];
+      try {
+        const originalSchema = buildSchemaFromEncodedString(originalFileContent.content);
+        const changedSchema = buildSchemaFromEncodedString(changedFileContent.content);
 
-  //     try {
-  //       const originalSchema = buildSchemaFromEncodedString(originalFileContent.content);
-  //       const changedSchema = buildSchemaFromEncodedString(changedFileContent.content);
+        breakingChanges = findBreakingChanges(originalSchema, changedSchema);
+      } catch (error) {
+        if (error instanceof GraphQLError) {
+          parseError = error;
+        } else {
+          throw error;
+        }
+      }
 
-  //       breakingChanges = findBreakingChanges(originalSchema, changedSchema);
-  //     } catch (error) {
-  //       if (error instanceof GraphQLError) {
-  //         parseError = error;
-  //       } else {
-  //         throw error;
-  //       }
-  //     }
+      arr.push({
+        file: file.filename,
+        url: changedFileContent.html_url,
+        parseError,
+        breakingChanges,
+      });
+    } catch (error) {
+      if (error.code !== 404 && error.message !== 'Schema file renamed, but no changes detected.') {
+        console.error(error);
+      }
+    }
+    return arr;
+  }, Promise.resolve([]));
 
-  //     arr.push({
-  //       file: file.filename,
-  //       url: changedFileContent.html_url,
-  //       parseError,
-  //       breakingChanges,
-  //     });
-  //   } catch (error) {
-  //     if (error.code !== 404 && error.message !== 'Schema file renamed, but no changes detected.') {
-  //       console.error(error);
-  //     }
-  //   }
-  //   return arr;
-  // }, Promise.resolve([]));
+  let commentBody = [];
 
-  // let commentBody = [];
+  for (const result of analysisResults) {
+    commentBody.push(`### File: [\`${result.file}\`](${result.url})`);
 
-  // for (const result of analysisResults) {
-  //   commentBody.push(`### File: [\`${result.file}\`](${result.url})`);
+    if (!result.breakingChanges.length) {
+      if (result.parseError) {
+        const errorMessage = result.parseError.message;
+        const errorMessagePieces = errorMessage.split('\n\n');
+        const message = errorMessagePieces[0];
+        const code = errorMessagePieces[1];
+        commentBody.push(message);
+        commentBody.push(`\`\`\`graphql\n${code}\n\`\`\``);
+      } else {
+        commentBody.push('No breaking changes detected :tada:');
+      }
+    }
 
-  //   if (!result.breakingChanges.length) {
-  //     if (result.parseError) {
-  //       const errorMessage = result.parseError.message;
-  //       const errorMessagePieces = errorMessage.split('\n\n');
-  //       const message = errorMessagePieces[0];
-  //       const code = errorMessagePieces[1];
-  //       commentBody.push(message);
-  //       commentBody.push(`\`\`\`graphql\n${code}\n\`\`\``);
-  //     } else {
-  //       commentBody.push('No breaking changes detected :tada:');
-  //     }
-  //   }
+    const breakingChanges = _.groupBy(result.breakingChanges, 'type');
 
-  //   const breakingChanges = _.groupBy(result.breakingChanges, 'type');
+    for (const breakingChangeType in breakingChanges) {
+      commentBody = commentBody.concat(
+        getMessagesForBreakingChanges(breakingChangeType, breakingChanges[breakingChangeType]),
+      );
+    }
+  }
 
-  //   for (const breakingChangeType in breakingChanges) {
-  //     commentBody = commentBody.concat(
-  //       getMessagesForBreakingChanges(breakingChangeType, breakingChanges[breakingChangeType]),
-  //     );
-  //   }
-  // }
-
-  // if (thisBotComment) {
-  //   if (!commentBody.length) {
-  //     commentBody.push('No breaking changes detected :tada:');
-  //   }
-  //   await gh.updateComment(repo.owner.login, repo.name, thisBotComment.id, commentBody.join('\n'));
-  // } else {
-  //   await gh.createComment(repo.owner.login, repo.name, pullRequestPayload.number, commentBody.join('\n'));
-  // }
+  if (thisBotComment) {
+    if (!commentBody.length) {
+      commentBody.push('No breaking changes detected :tada:');
+    }
+    await gh.updateComment(repo.owner.login, repo.name, thisBotComment.id, commentBody.join('\n'));
+  } else {
+  await gh.createComment(repo.owner.login, repo.name, pullRequestPayload.number, commentBody.join('\n'));
+  }
 });
 
 export default app;
