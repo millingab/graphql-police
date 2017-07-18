@@ -85,6 +85,7 @@ app.use(async (ctx) => {
   const data = ctx.request.body;
   const pullRequestPayload = data.pull_request;
   const { repository: repo } = data;
+  const path = '.github/graphql-schema-police.yml'
 
   if (!pullRequestPayload) {
     return;
@@ -94,13 +95,22 @@ app.use(async (ctx) => {
     return;
   }
 
-  console.log('Handling PR:', pullRequestPayload.html_url);
+  const { base, head } = pullRequestPayload;
 
   await gh.authenticateGithubApp(data.installation.id);
 
-  // const { data: thisBot } = await gh.getLoggedUser();
-
-  const { base, head } = pullRequestPayload;
+  try {
+    const { data: originalFileContent } = await gh.getFileContent(
+      head.user.login,
+      head.repo.name,
+      path,
+      head.sha,
+    );
+  } catch (err) {
+    return;
+  }
+  
+  console.log('Handling PR:', pullRequestPayload.html_url);
 
   const thisBotComment = await gh.findThisBotComment(head.user.login, head.repo.name, pullRequestPayload.number);
   
@@ -110,6 +120,7 @@ app.use(async (ctx) => {
 
   // No schema files were modified
   if (!changedSchemaFiles.length) {
+    console.log('No changes to schema.graphql files for PR:', pullRequestPayload.html_url);
     return;
   }
 
@@ -182,13 +193,15 @@ app.use(async (ctx) => {
         commentBody.push(message);
         commentBody.push(`\`\`\`graphql\n${code}\n\`\`\``);
       } else {
+        console.log('No breaking changes in PR:', pullRequestPayload.html_url);
         commentBody.push('No breaking changes detected :tada:');
       }
     }
 
     const breakingChanges = _.groupBy(result.breakingChanges, 'type');
-
+    
     for (const breakingChangeType in breakingChanges) {
+      console.log('New breaking change: ', getMessagesForBreakingChanges(breakingChangeType, breakingChanges[breakingChangeType]), '; found in PR:', pullRequestPayload.html_url);
       commentBody = commentBody.concat(
         getMessagesForBreakingChanges(breakingChangeType, breakingChanges[breakingChangeType]),
       );
@@ -197,11 +210,15 @@ app.use(async (ctx) => {
 
   if (thisBotComment) {
     if (!commentBody.length) {
+      console.log('No breaking changes in PR:', pullRequestPayload.html_url);
       commentBody.push('No breaking changes detected :tada:');
     }
+    console.log('Updating comment on PR:', pullRequestPayload.html_url);
     await gh.updateComment(repo.owner.login, repo.name, thisBotComment.id, commentBody.join('\n'));
-  } else {
-  await gh.createComment(repo.owner.login, repo.name, pullRequestPayload.number, commentBody.join('\n'));
+  } 
+  else {
+    console.log('Creating comment on PR:', pullRequestPayload.html_url);
+    await gh.createComment(repo.owner.login, repo.name, pullRequestPayload.number, commentBody.join('\n'));
   }
 });
 

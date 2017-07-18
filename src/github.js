@@ -8,7 +8,7 @@ import type { GhCommit } from './TypeDefinition';
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
 const appId = 3670;
-const cert = fs.readFileSync('graphql-police.2017-07-12.private-key.pem');
+const cert = fs.readFileSync('graphql-police.2017-07-18.private-key.pem');
 
 const gh = new GitHubApi({
   debug: true,
@@ -26,7 +26,7 @@ export const authenticateGithubApp = async (id: string) => {
   const jwt_token = jwt.sign({ iss: appId },
     cert, {
       algorithm: 'RS256',
-      expiresIn: '10m'
+      expiresIn: '5m'
     });
 
   gh.authenticate({
