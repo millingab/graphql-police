@@ -101,10 +101,10 @@ app.use(async (ctx) => {
 
   try {
     const { data: originalFileContent } = await gh.getFileContent(
-      head.user.login,
-      head.repo.name,
+      base.user.login,
+      base.repo.name,
       path,
-      head.sha,
+      base.sha,
     );
   } catch (err) {
     return;
