@@ -182,6 +182,11 @@ app.use(async (ctx) => {
   let commentBody = [];
 
   for (const result of analysisResults) {
+    if (!result.breakingChanges.length && !thisBotComment) {
+      console.log('No breaking changes in PR:', pullRequestPayload.html_url);
+      return;
+    }
+
     commentBody.push(`### File: [\`${result.file}\`](${result.url})`);
 
     if (!result.breakingChanges.length) {
@@ -199,7 +204,7 @@ app.use(async (ctx) => {
     }
 
     const breakingChanges = _.groupBy(result.breakingChanges, 'type');
-    
+  
     for (const breakingChangeType in breakingChanges) {
       console.log('New breaking change: ', getMessagesForBreakingChanges(breakingChangeType, breakingChanges[breakingChangeType]), '; found in PR:', pullRequestPayload.html_url);
       commentBody = commentBody.concat(
@@ -210,7 +215,7 @@ app.use(async (ctx) => {
 
   if (thisBotComment) {
     if (!commentBody.length) {
-      console.log('No breaking changes in PR:', pullRequestPayload.html_url);
+      console.log('No breaking changes in PR [unreachable]:', pullRequestPayload.html_url);
       commentBody.push('No breaking changes detected :tada:');
     }
     console.log('Updating comment on PR:', pullRequestPayload.html_url);
