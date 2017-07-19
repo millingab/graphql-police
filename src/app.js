@@ -187,7 +187,7 @@ app.use(async (ctx) => {
       return;
     }
 
-    commentBody.push(`### File: [\`${result.file}\`](${result.url})`);
+    commentBody.push(`#### File: [\`${result.file}\`](${result.url})`);
 
     if (!result.breakingChanges.length) {
       if (result.parseError) {
