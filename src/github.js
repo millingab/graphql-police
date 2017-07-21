@@ -11,7 +11,7 @@ const appId = 3670;
 const cert = fs.readFileSync('graphql-police.2017-07-18.private-key.pem');
 
 const gh = new GitHubApi({
-  debug: true,
+  debug: false,
   protocol: 'https',
   host: 'api.github.com',
   headers: {

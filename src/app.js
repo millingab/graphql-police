@@ -67,7 +67,7 @@ app.use(async (ctx, next) => {
   const event = ctx.request.headers['x-github-event'];
   const id = ctx.request.headers['x-github-delivery'];
 
-  console.log(`Handling webhook ${id} for event ${event}.`);
+  console.log(`Received webhook ${id} for event ${event}.`);
   const computedSig = new Buffer(signBlob(process.env.GITHUB_WEBHOOK_SECRET, ctx.request.rawBody));
 
   if (!bufferEquals(new Buffer(signature), computedSig)) {
@@ -109,8 +109,6 @@ app.use(async (ctx) => {
   } catch (err) {
     return;
   }
-  
-  console.log('Handling PR:', pullRequestPayload.html_url);
 
   const thisBotComment = await gh.findThisBotComment(head.user.login, head.repo.name, pullRequestPayload.number);
   
@@ -118,10 +116,42 @@ app.use(async (ctx) => {
 
   const changedSchemaFiles = filterSchemaFiles(changedFiles);
 
+  var requestLog = {
+    "webhookId": ctx.request.headers['x-github-delivery'],
+    "pullRequest": {
+      "id": pullRequestPayload.id,
+      "url": pullRequestPayload.url,
+      "state": pullRequestPayload.state,
+      "title": pullRequestPayload.title
+    },
+    "head": {
+      "userLogin": head.user.login,
+      "repoName": head.repo.name,
+      "sha": head.sha
+    },
+    "base": {
+      "userLogin": base.user.login,
+      "repoName": base.repo.name,
+      "sha": base.sha
+    },
+    "git_commit_url": "https://api.github.com/repos/"+head.user.login+"/"+head.repo.name+"/git/commits/"+head.sha,
+    "previousBotComment": thisBotComment,
+    "Files": {
+      'changedFiles': changedFiles,
+      'changedSchemaFiles': changedSchemaFiles
+    }
+  };
+  
+  console.log('Handling request:', requestLog);
+
   // No schema files were modified
   if (!changedSchemaFiles.length) {
-    console.log('No changes to schema.graphql files for PR:', pullRequestPayload.html_url);
+    console.log('No changes to .graphql files found in webhook:', ctx.request.headers['x-github-delivery']);
     return;
+  }
+
+  var changesLog = {
+    'previousBotComment': thisBotComment 
   }
 
   const analysisResults = await changedSchemaFiles.reduce(async (accumP: Promise<Array<AnalysisResult>>, file) => {
@@ -150,24 +180,29 @@ app.use(async (ctx) => {
         head.sha,
       );
       let parseError = null;
+      let schemaError = null;
       let breakingChanges = [];
 
       try {
         const originalSchema = buildSchemaFromEncodedString(originalFileContent.content);
         const changedSchema = buildSchemaFromEncodedString(changedFileContent.content);
 
+        changesLog['baseSchema'] = originalSchema;
+        changesLog['headSchema'] = changedSchema;
+
         breakingChanges = findBreakingChanges(originalSchema, changedSchema);
       } catch (error) {
         if (error instanceof GraphQLError) {
           parseError = error;
         } else {
-          throw error;
+          schemaError = error;
         }
       }
 
       arr.push({
         file: file.filename,
         url: changedFileContent.html_url,
+        schemaError,
         parseError,
         breakingChanges,
       });
@@ -179,50 +214,67 @@ app.use(async (ctx) => {
     return arr;
   }, Promise.resolve([]));
 
+  changesLog['breakingChanges'] = analysisResults.breakingChanges;
+  changesLog['schemaError'] = analysisResults.schemaError;
+  changesLog['parseError'] = analysisResults.parseError;
+
+  console.log("Analysed schema files in webhook:", ctx.request.headers['x-github-delivery'], "\n", changesLog);
+
   let commentBody = [];
 
   for (const result of analysisResults) {
-    if (!result.breakingChanges.length && !thisBotComment) {
-      console.log('No breaking changes in PR:', pullRequestPayload.html_url);
-      return;
+    if (result.schemaError) {
+      commentBody.push(`#### Error reading file: [\`${result.file}\`](${result.url})`);
+      commentBody.push(result.schemaError.message);
     }
+    else {
+      if(!thisBotComment && !result.breakingChanges.length && !result.parseError) {
+        return;    
+      }
 
-    commentBody.push(`#### File: [\`${result.file}\`](${result.url})`);
+      commentBody.push(`#### File: [\`${result.file}\`](${result.url})`); 
 
-    if (!result.breakingChanges.length) {
-      if (result.parseError) {
-        const errorMessage = result.parseError.message;
-        const errorMessagePieces = errorMessage.split('\n\n');
-        const message = errorMessagePieces[0];
-        const code = errorMessagePieces[1];
-        commentBody.push(message);
-        commentBody.push(`\`\`\`graphql\n${code}\n\`\`\``);
-      } else {
-        console.log('No breaking changes in PR:', pullRequestPayload.html_url);
-        commentBody.push('No breaking changes detected :tada:');
+      if (!result.breakingChanges.length) {
+        if (result.parseError) {
+          const errorMessage = result.parseError.message;
+          const errorMessagePieces = errorMessage.split('\n\n');
+          const message = errorMessagePieces[0];
+          const code = errorMessagePieces[1];
+          commentBody.push(message);
+          commentBody.push(`\`\`\`graphql\n${code}\n\`\`\``);
+        } 
+        else {
+          commentBody.push('No breaking changes detected :tada:');
+        }
+      }
+
+      const breakingChanges = _.groupBy(result.breakingChanges, 'type');
+    
+      for (const breakingChangeType in breakingChanges) {
+        commentBody = commentBody.concat(
+          getMessagesForBreakingChanges(breakingChangeType, breakingChanges[breakingChangeType]),
+        );
       }
     }
+  } 
 
-    const breakingChanges = _.groupBy(result.breakingChanges, 'type');
-  
-    for (const breakingChangeType in breakingChanges) {
-      console.log('New breaking change: ', getMessagesForBreakingChanges(breakingChangeType, breakingChanges[breakingChangeType]), '; found in PR:', pullRequestPayload.html_url);
-      commentBody = commentBody.concat(
-        getMessagesForBreakingChanges(breakingChangeType, breakingChanges[breakingChangeType]),
-      );
-    }
+  var commentLog = {
+    'pullRequestUrl': pullRequestPayload.url,
+    'comment': commentBody.join('\n')
   }
 
   if (thisBotComment) {
     if (!commentBody.length) {
-      console.log('No breaking changes in PR [unreachable]:', pullRequestPayload.html_url);
+      console.log('No breaking changes in ${result.file} file for PR [unreachable]:', pullRequestPayload.html_url);
       commentBody.push('No breaking changes detected :tada:');
     }
-    console.log('Updating comment on PR:', pullRequestPayload.html_url);
+    commentLog['type'] = 'Update';
+    console.log('commment from webhook: ', ctx.request.headers['x-github-delivery'], "\n", commentLog);
     await gh.updateComment(repo.owner.login, repo.name, thisBotComment.id, commentBody.join('\n'));
   } 
   else {
-    console.log('Creating comment on PR:', pullRequestPayload.html_url);
+    commentLog['type'] = 'Create';
+    console.log('commment from webhook: ', ctx.request.headers['x-github-delivery'], "\n", commentLog);
     await gh.createComment(repo.owner.login, repo.name, pullRequestPayload.number, commentBody.join('\n'));
   }
 });
