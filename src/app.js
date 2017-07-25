@@ -142,16 +142,12 @@ app.use(async (ctx) => {
     }
   };
   
-  console.log('Handling request:', requestLog);
+  console.log(JSON.stringify(requestLog));
 
   // No schema files were modified
   if (!changedSchemaFiles.length) {
     console.log('No changes to .graphql files found in webhook:', ctx.request.headers['x-github-delivery']);
     return;
-  }
-
-  var changesLog = {
-    'previousBotComment': thisBotComment 
   }
 
   const analysisResults = await changedSchemaFiles.reduce(async (accumP: Promise<Array<AnalysisResult>>, file) => {
@@ -187,9 +183,6 @@ app.use(async (ctx) => {
         const originalSchema = buildSchemaFromEncodedString(originalFileContent.content);
         const changedSchema = buildSchemaFromEncodedString(changedFileContent.content);
 
-        changesLog['baseSchema'] = originalSchema;
-        changesLog['headSchema'] = changedSchema;
-
         breakingChanges = findBreakingChanges(originalSchema, changedSchema);
       } catch (error) {
         if (error instanceof GraphQLError) {
@@ -214,11 +207,16 @@ app.use(async (ctx) => {
     return arr;
   }, Promise.resolve([]));
 
-  changesLog['breakingChanges'] = analysisResults.breakingChanges;
-  changesLog['schemaError'] = analysisResults.schemaError;
-  changesLog['parseError'] = analysisResults.parseError;
 
-  console.log("Analysed schema files in webhook:", ctx.request.headers['x-github-delivery'], "\n", changesLog);
+  var changesLog = {
+    'previousBotComment': thisBotComment,
+    'breakingChanges': analysisResults.breakingChanges,
+    'schemaError': analysisResults.schemaError,
+    'parseError': analysisResults.parseError,
+    'webhookId': ctx.request.headers['x-github-delivery']
+  }
+  
+  console.log(JSON.stringify(changesLog));
 
   let commentBody = [];
 
@@ -260,7 +258,8 @@ app.use(async (ctx) => {
 
   var commentLog = {
     'pullRequestUrl': pullRequestPayload.url,
-    'comment': commentBody.join('\n')
+    'comment': commentBody.join('\n'),
+    'webhookId': ctx.request.headers['x-github-delivery']
   }
 
   if (thisBotComment) {
@@ -269,12 +268,12 @@ app.use(async (ctx) => {
       commentBody.push('No breaking changes detected :tada:');
     }
     commentLog['type'] = 'Update';
-    console.log('commment from webhook: ', ctx.request.headers['x-github-delivery'], "\n", commentLog);
+    console.log(JSON.stringify(commentLog));
     await gh.updateComment(repo.owner.login, repo.name, thisBotComment.id, commentBody.join('\n'));
   } 
   else {
     commentLog['type'] = 'Create';
-    console.log('commment from webhook: ', ctx.request.headers['x-github-delivery'], "\n", commentLog);
+    console.log(JSON.stringify(commentLog));
     await gh.createComment(repo.owner.login, repo.name, pullRequestPayload.number, commentBody.join('\n'));
   }
 });
