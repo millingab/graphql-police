@@ -118,12 +118,8 @@ app.use(async (ctx) => {
 
   var requestLog = {
     "webhookId": ctx.request.headers['x-github-delivery'],
-    "pullRequest": {
-      "id": pullRequestPayload.id,
-      "url": pullRequestPayload.url,
-      "state": pullRequestPayload.state,
-      "title": pullRequestPayload.title
-    },
+    "pullRequestUrl": pullRequestPayload.url,
+    "pullRequestTitle": pullRequestPayload.title,
     "head": {
       "userLogin": head.user.login,
       "repoName": head.repo.name,
@@ -142,7 +138,7 @@ app.use(async (ctx) => {
     }
   };
   
-  console.log(JSON.stringify(requestLog));
+  console.log(requestLog);
 
   // No schema files were modified
   if (!changedSchemaFiles.length) {
@@ -207,22 +203,23 @@ app.use(async (ctx) => {
     return arr;
   }, Promise.resolve([]));
 
-
-  var changesLog = {
-    'previousBotComment': thisBotComment,
-    'breakingChanges': analysisResults.breakingChanges,
-    'schemaError': analysisResults.schemaError,
-    'parseError': analysisResults.parseError,
-    'webhookId': ctx.request.headers['x-github-delivery']
-  }
-  
-  console.log(JSON.stringify(changesLog));
-
   let commentBody = [];
 
   for (const result of analysisResults) {
+    var changesLog = {
+      'previousBotComment': thisBotComment,
+      'breakingChanges': result.breakingChanges,
+      'schemaError': result.schemaError,
+      'parseError': result.parseError,
+      'webhookId': ctx.request.headers['x-github-delivery'],
+      'file': result.file,
+      'pullRequestUrl': pullRequestPayload.url
+    }
+    
+    console.log(changesLog);
+
     if (result.schemaError) {
-      commentBody.push(`#### Error reading file: [\`${result.file}\`](${result.url})`);
+      commentBody.push(`### :bangbang: Error reading file: [\`${result.file}\`](${result.url})`);
       commentBody.push(result.schemaError.message);
     }
     else {
@@ -230,24 +227,25 @@ app.use(async (ctx) => {
         return;    
       }
 
-      commentBody.push(`#### File: [\`${result.file}\`](${result.url})`); 
-
       if (!result.breakingChanges.length) {
         if (result.parseError) {
           const errorMessage = result.parseError.message;
           const errorMessagePieces = errorMessage.split('\n\n');
           const message = errorMessagePieces[0];
           const code = errorMessagePieces[1];
+          commentBody.push(`### :construction: Syntax error in file: [\`${result.file}\`](${result.url})`);
           commentBody.push(message);
           commentBody.push(`\`\`\`graphql\n${code}\n\`\`\``);
         } 
         else {
-          commentBody.push('No breaking changes detected :tada:');
+          commentBody.push(`### :tada: No breaking changes detected in file: [\`${result.file}\`](${result.url})`);
         }
       }
 
       const breakingChanges = _.groupBy(result.breakingChanges, 'type');
-    
+      if(result.breakingChanges.length) {
+        commentBody.push(`### :police_car: Breaking changes detected in file: [\`${result.file}\`](${result.url})`);
+      }
       for (const breakingChangeType in breakingChanges) {
         commentBody = commentBody.concat(
           getMessagesForBreakingChanges(breakingChangeType, breakingChanges[breakingChangeType]),
@@ -259,7 +257,8 @@ app.use(async (ctx) => {
   var commentLog = {
     'pullRequestUrl': pullRequestPayload.url,
     'comment': commentBody.join('\n'),
-    'webhookId': ctx.request.headers['x-github-delivery']
+    'webhookId': ctx.request.headers['x-github-delivery'],
+    'pullRequestUrl': pullRequestPayload.url
   }
 
   if (thisBotComment) {
@@ -268,12 +267,12 @@ app.use(async (ctx) => {
       commentBody.push('No breaking changes detected :tada:');
     }
     commentLog['type'] = 'Update';
-    console.log(JSON.stringify(commentLog));
+    console.log(commentLog);
     await gh.updateComment(repo.owner.login, repo.name, thisBotComment.id, commentBody.join('\n'));
   } 
   else {
     commentLog['type'] = 'Create';
-    console.log(JSON.stringify(commentLog));
+    console.log(commentLog);
     await gh.createComment(repo.owner.login, repo.name, pullRequestPayload.number, commentBody.join('\n'));
   }
 });
