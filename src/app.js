@@ -99,6 +99,15 @@ app.use(async (ctx) => {
 
   await gh.authenticateGithubApp(data.installation.id);
 
+  const realBaseSha = await gh.findBaseCommit(head.user.login, head.repo.name, pullRequestPayload.number);
+
+  if (realBaseSha) {
+    payloadSha = base.sha;
+    base.sha = realBaseSha;
+  } else {
+    return;
+  }
+
   try {
     const { data: originalFileContent } = await gh.getFileContent(
       base.user.login,
@@ -117,6 +126,7 @@ app.use(async (ctx) => {
   const changedSchemaFiles = filterSchemaFiles(changedFiles);
 
   var requestLog = {
+    "message": "Processed paylod"
     "webhookId": ctx.request.headers['x-github-delivery'],
     "pullRequestUrl": pullRequestPayload.url,
     "pullRequestTitle": pullRequestPayload.title,
@@ -128,7 +138,8 @@ app.use(async (ctx) => {
     "base": {
       "userLogin": base.user.login,
       "repoName": base.repo.name,
-      "sha": base.sha
+      "updatedSha": base.sha,
+      "payloadSha": payloadSha
     },
     "git_commit_url": "https://api.github.com/repos/"+head.user.login+"/"+head.repo.name+"/git/commits/"+head.sha,
     "previousBotComment": thisBotComment,
@@ -207,6 +218,7 @@ app.use(async (ctx) => {
 
   for (const result of analysisResults) {
     var changesLog = {
+      'message': 'Performed analysis',
       'previousBotComment': thisBotComment,
       'breakingChanges': result.breakingChanges,
       'schemaError': result.schemaError,
@@ -245,6 +257,7 @@ app.use(async (ctx) => {
       const breakingChanges = _.groupBy(result.breakingChanges, 'type');
       if(result.breakingChanges.length) {
         commentBody.push(`### :police_car: Breaking changes detected in file: [\`${result.file}\`](${result.url})`);
+        commentBody.push(`Changes you have made will break GraphQL API functionality for our clients. Avoid these changes or provide a clear justification if they are neccessary. Learn more about [extending schemas](https://github.com/Shopify/graphql#extending-schemas-and-versioning).`);
       }
       for (const breakingChangeType in breakingChanges) {
         commentBody = commentBody.concat(
@@ -266,12 +279,12 @@ app.use(async (ctx) => {
       console.log('No breaking changes in ${result.file} file for PR [unreachable]:', pullRequestPayload.html_url);
       commentBody.push('No breaking changes detected :tada:');
     }
-    commentLog['type'] = 'Update';
+    commentLog['message'] = 'Updated comment';
     console.log(commentLog);
     await gh.updateComment(repo.owner.login, repo.name, thisBotComment.id, commentBody.join('\n'));
   } 
   else {
-    commentLog['type'] = 'Create';
+    commentLog['message'] = 'Created comment';
     console.log(commentLog);
     await gh.createComment(repo.owner.login, repo.name, pullRequestPayload.number, commentBody.join('\n'));
   }

@@ -71,6 +71,37 @@ export const findThisBotComment = async (
   return found;
 };
 
+export const findBaseCommit = async (
+    owner: string,
+    repo: string,
+    pullRequestNumber: number,
+    currentPage: ?number = 1,
+  ) => {
+  const result = await gh.pullRequests.getCommits({
+    owner,
+    repo,
+    number: pullRequestNumber,
+    per_page: 1,
+    page: currentPage,
+  });
+
+  const commits = result.data;
+
+  if (commits[0].parents.length === 1) {
+    return commits[0].parents[0].sha;
+  }
+  else {
+    var errLog = {
+      "message": "More than one parents found for the first commit of the PR. First commit of a PR should only have one parent. Something is wrong here.",
+      "webhookId": ctx.request.headers['x-github-delivery'],
+      "pullRequestUrl": pullRequestPayload.url,
+      "firstCommit": commits[0]
+    }
+    console.log(errLog);
+    return null;
+  }
+}
+
 export const getFileContent = async (owner: string, repo: string, path: string, ref: string) =>
   gh.repos.getContent({
     owner,
