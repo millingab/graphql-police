@@ -126,7 +126,7 @@ app.use(async (ctx) => {
   const changedSchemaFiles = filterSchemaFiles(changedFiles);
 
   var requestLog = {
-    "message": "Processed paylod"
+    "message": "Processed paylod",
     "webhookId": ctx.request.headers['x-github-delivery'],
     "pullRequestUrl": pullRequestPayload.url,
     "pullRequestTitle": pullRequestPayload.title,
