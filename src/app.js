@@ -99,7 +99,7 @@ app.use(async (ctx) => {
 
   await gh.authenticateGithubApp(data.installation.id);
 
-  const realBaseSha = await gh.findBaseCommit(head.user.login, head.repo.name, pullRequestPayload.number);
+  const realBaseSha = await gh.findBaseCommit(head.user.login, head.repo.name, pullRequestPayload.number, ctx.request.headers['x-github-delivery'], pullRequestPayload.url);
 
   if (realBaseSha) {
     payloadSha = base.sha;

@@ -75,6 +75,8 @@ export const findBaseCommit = async (
     owner: string,
     repo: string,
     pullRequestNumber: number,
+    webhookId: string,
+    pullRequestUrl: string,
     currentPage: ?number = 1,
   ) => {
   const result = await gh.pullRequests.getCommits({
@@ -93,8 +95,8 @@ export const findBaseCommit = async (
   else {
     var errLog = {
       "message": "More than one parents found for the first commit of the PR. First commit of a PR should only have one parent. Something is wrong here.",
-      "webhookId": ctx.request.headers['x-github-delivery'],
-      "pullRequestUrl": pullRequestPayload.url,
+      "webhookId": webhookId,
+      "pullRequestUrl": pullRequestUrl,
       "firstCommit": commits[0]
     }
     console.log(errLog);
