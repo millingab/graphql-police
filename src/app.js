@@ -101,6 +101,8 @@ app.use(async (ctx) => {
 
   const realBaseSha = await gh.findBaseCommit(head.user.login, head.repo.name, pullRequestPayload.number, ctx.request.headers['x-github-delivery'], pullRequestPayload.url);
 
+  var payloadSha = ""
+
   if (realBaseSha) {
     payloadSha = base.sha;
     base.sha = realBaseSha;
